@@ -6,52 +6,27 @@
   <title>拉屎记录器</title>
   <script src="https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-white text-gray-800 font-sans p-4">
-  <div class="max-w-2xl mx-auto">
-    <!-- Header -->
-    <div class="flex justify-between items-center mb-4">
-      <button id="prevMonth" class="text-xl">&#8249;</button>
-      <h1 id="monthTitle" class="text-xl font-semibold">Month</h1>
-      <button id="nextMonth" class="text-xl">&#8250;</button>
-    </div>
+  <!-- Firebase Web SDK -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
+    import { getDatabase, ref, push, onValue, remove } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js";
 
-    <!-- Calendar -->
-    <div id="calendarGrid" class="grid grid-cols-7 gap-2 text-center mb-6 min-h-[15rem]"></div>
+    // ---- Firebase Config ----
+    const firebaseConfig = {
+      apiKey: "AIzaSyBHm529okQCML4dtGIiwWY9L-0_dEglaL0",
+      authDomain: "shiit-a2d59.firebaseapp.com",
+      databaseURL: "https://shiit-a2d59-default-rtdb.firebaseio.com",
+      projectId: "shiit-a2d59",
+      storageBucket: "shiit-a2d59.appspot.com",
+      messagingSenderId: "394472600873",
+      appId: "1:394472600873:web:98da9f2eedf522afd4b338",
+      measurementId: "G-NDY4BDJS81"
+    };
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    const evtRef = ref(db, "events");
 
-    <!-- Controls -->
-    <div class="space-y-6">
-      <div class="flex gap-2">
-        <button id="addWawa" class="flex-1 bg-green-500 hover:bg-green-600 text-white py-1 rounded text-sm">蛙蛙 +1 (今天)</button>
-        <button id="addXiaowu" class="flex-1 bg-blue-500 hover:bg-blue-600 text-white py-1 rounded text-sm">小吴 +1 (今天)</button>
-      </div>
-
-      <div class="space-y-1 text-sm">
-        <div class="flex items-center gap-2">
-          <label for="selectDateTime">补充时间:</label>
-          <input id="selectDateTime" type="datetime-local" class="border p-1 rounded flex-1">
-        </div>
-        <div class="flex gap-2">
-          <button id="addWawaDate" class="flex-1 bg-green-300 hover:bg-green-400 text-white py-1 rounded text-sm">蛙蛙补 +1</button>
-          <button id="addXiaowuDate" class="flex-1 bg-blue-300 hover:bg-blue-400 text-white py-1 rounded text-sm">小吴补 +1</button>
-        </div>
-      </div>
-
-      <div class="text-sm text-gray-700">
-        <p id="wawaTotal" class="font-semibold"></p>
-        <p id="xiaowuTotal" class="font-semibold"></p>
-      </div>
-
-      <!-- Records -->
-      <div>
-        <h2 class="font-semibold mt-4">本月详细记录 (分钟级)</h2>
-        <ul id="recordList" class="list-disc pl-5 text-sm mt-2 space-y-1 max-h-64 overflow-y-auto"></ul>
-      </div>
-    </div>
-  </div>
-
-  <script>
-    // DOM refs
+    // ---- DOM Refs ----
     const monthTitle = document.getElementById('monthTitle');
     const calendarGrid = document.getElementById('calendarGrid');
     const prevBtn = document.getElementById('prevMonth');
@@ -61,95 +36,80 @@
     const recordList = document.getElementById('recordList');
     const dtInput = document.getElementById('selectDateTime');
 
-    // state
+    // ---- State ----
+    const events = []; // {time:dayjs, person}
+    const dailyCounts = {};
     let currentDate = dayjs().startOf('month');
-    const dailyCounts = {}; // {YYYY-MM-DD: {wawa: n, xiaowu: m}}
-    const events = [];      // [{time: dayjs, person:'wawa'|'xiaowu'}]
 
-    // utils
+    // ---- Firebase listeners ----
+    onValue(evtRef, snap => {
+      events.length = 0; // reset
+      Object.keys(dailyCounts).forEach(k => delete dailyCounts[k]);
+      const data = snap.val() || {};
+      Object.entries(data).forEach(([id, e]) => {
+        const t = dayjs(e.time);
+        events.push({ id, person: e.person, time: t });
+        const key = t.format('YYYY-MM-DD');
+        if (!dailyCounts[key]) dailyCounts[key] = { wawa: 0, xiaowu: 0 };
+        dailyCounts[key][e.person]++;
+      });
+      renderCalendar(currentDate);
+    });
+
+    // ---- Helper to push event ----
     function addEvent(person, time) {
-      const key = time.format('YYYY-MM-DD');
-      if (!dailyCounts[key]) dailyCounts[key] = { wawa: 0, xiaowu: 0 };
-      dailyCounts[key][person] += 1;
-      events.push({ time, person });
+      push(evtRef, { person, time: time.toISOString() });
     }
 
-    // render calendar grid
+    // ---- Delete (remove) ----
+    window.deleteEvent = id => {
+      remove(ref(db, `events/${id}`));
+    };
+
+    // ---- Rendering functions (same as before) ----
     function renderCalendar(date) {
       monthTitle.textContent = date.format('YYYY年MM月');
       calendarGrid.innerHTML = '';
-
-      // weekday header
-      ['日','一','二','三','四','五','六'].forEach(d => {
-        const h = document.createElement('div');
-        h.className = 'font-bold text-sm';
-        h.textContent = d;
-        calendarGrid.appendChild(h);
-      });
-
-      const startDay = date.startOf('month').day();
-      for (let i = 0; i < startDay; i++) calendarGrid.appendChild(document.createElement('div'));
-
-      const daysInMonth = date.daysInMonth();
-      for (let d = 1; d <= daysInMonth; d++) {
+      ['日','一','二','三','四','五','六'].forEach(d=>{const h=document.createElement('div');h.textContent=d;h.className='font-bold text-sm';calendarGrid.appendChild(h);});
+      const start = date.startOf('month').day();
+      for(let i=0;i<start;i++) calendarGrid.appendChild(document.createElement('div'));
+      const days = date.daysInMonth();
+      for(let d=1;d<=days;d++){
         const full = date.date(d).format('YYYY-MM-DD');
-        const cell = document.createElement('div');
-        cell.className = 'py-1 border rounded flex flex-col items-center';
-        cell.innerHTML = `<span>${d}</span>`;
+        const cell = document.createElement('div');cell.className='py-1 border rounded flex flex-col items-center';cell.innerHTML=`<span>${d}</span>`;
         const cnt = dailyCounts[full] || { wawa:0, xiaowu:0 };
-        if (cnt.wawa+cnt.xiaowu>0) {
-          const tag = document.createElement('div');
-          tag.className='text-xs mt-0.5';
-          tag.innerHTML = `<span class='text-green-600'>蛙:${cnt.wawa}</span> <span class='text-blue-600'>吴:${cnt.xiaowu}</span>`;
-          cell.appendChild(tag);
-        }
-        if (dayjs().isSame(date.date(d),'day')) cell.classList.add('border-blue-400');
+        if(cnt.wawa+cnt.xiaowu){const tag=document.createElement('div');tag.className='text-xs mt-0.5';tag.innerHTML=`<span class='text-green-600'>蛙:${cnt.wawa}</span> <span class='text-blue-600'>吴:${cnt.xiaowu}</span>`;cell.appendChild(tag);} 
+        if(dayjs().isSame(date.date(d),'day')) cell.classList.add('border-blue-400');
         calendarGrid.appendChild(cell);
       }
-
       renderTotals();
       renderList();
     }
 
-    function renderTotals() {
-      const key = currentDate.format('YYYY-MM');
-      let w=0,x=0;
-      Object.entries(dailyCounts).forEach(([d,c])=>{ if(d.startsWith(key)){w+=c.wawa;x+=c.xiaowu;} });
-      wawaTotal.textContent = `蛙蛙本月次数: ${w}`;
-      xiaowuTotal.textContent = `小吴本月次数: ${x}`;
-    }
+    function renderTotals(){
+      const key = currentDate.format('YYYY-MM');let w=0,x=0;Object.entries(dailyCounts).forEach(([d,c])=>{if(d.startsWith(key)){w+=c.wawa;x+=c.xiaowu;}});wawaTotal.textContent=`蛙蛙本月次数: ${w}`;xiaowuTotal.textContent=`小吴本月次数: ${x}`;}
 
-    function renderList() {
+    function renderList(){
       recordList.innerHTML='';
-      const key = currentDate.format('YYYY-MM');
-      events.filter(e=>e.time.format('YYYY-MM')===key)
-            .sort((a,b)=>a.time-b.time)
-            .forEach((e,idx)=>{
-              const li=document.createElement('li');
-              li.innerHTML = `${e.time.format('MM-DD HH:mm')} - <span class='${e.person==='wawa'?'text-green-600':'text-blue-600'}'>${e.person==='wawa'?'蛙蛙':'小吴'}</span> <button class='text-red-500 underline text-xs' onclick='deleteEvt(${idx})'>撤销</button>`;
-              recordList.appendChild(li);
-            });
+      const key=currentDate.format('YYYY-MM');
+      events.filter(e=>e.time.format('YYYY-MM')===key).sort((a,b)=>a.time-b.time).forEach(e=>{
+        const li=document.createElement('li');
+        li.innerHTML=`${e.time.format('MM-DD HH:mm')} - <span class='${e.person==='wawa'?'text-green-600':'text-blue-600'}'>${e.person==='wawa'?'蛙蛙':'小吴'}</span> <button onclick='deleteEvent("${e.id}")' class='text-red-500 underline text-xs'>撤销</button>`;
+        recordList.appendChild(li);
+      });
     }
 
-    // delete
-    window.deleteEvt = idx => {
-      const ev = events[idx];
-      const key = ev.time.format('YYYY-MM-DD');
-      dailyCounts[key][ev.person]--; if(!dailyCounts[key].wawa && !dailyCounts[key].xiaowu) delete dailyCounts[key];
-      events.splice(idx,1);
-      renderCalendar(currentDate);
-    };
+    // ---- Button handlers ----
+    document.getElementById('addWawa').onclick = ()=> addEvent('wawa', dayjs());
+    document.getElementById('addXiaowu').onclick = ()=> addEvent('xiaowu', dayjs());
+    document.getElementById('addWawaDate').onclick = ()=>{ if(dtInput.value) addEvent('wawa', dayjs(dtInput.value)); };
+    document.getElementById('addXiaowuDate').onclick = ()=>{ if(dtInput.value) addEvent('xiaowu', dayjs(dtInput.value)); };
+    prevBtn.onclick = ()=>{ currentDate = currentDate.subtract(1,'month'); renderCalendar(currentDate); };
+    nextBtn.onclick = ()=>{ currentDate = currentDate.add(1,'month'); renderCalendar(currentDate); };
 
-    // handlers
-    document.getElementById('addWawa').onclick=()=>{addEvent('wawa',dayjs());renderCalendar(currentDate)};
-    document.getElementById('addXiaowu').onclick=()=>{addEvent('xiaowu',dayjs());renderCalendar(currentDate)};
-    document.getElementById('addWawaDate').onclick=()=>{if(dtInput.value) addEvent('wawa',dayjs(dtInput.value));renderCalendar(currentDate)};
-    document.getElementById('addXiaowuDate').onclick=()=>{if(dtInput.value) addEvent('xiaowu',dayjs(dtInput.value));renderCalendar(currentDate)};
-    prevBtn.onclick=()=>{currentDate=currentDate.subtract(1,'month');renderCalendar(currentDate)};
-    nextBtn.onclick=()=>{currentDate=currentDate.add(1,'month');renderCalendar(currentDate)};
-
-    // initial
+    // ---- First render (will be updated by listener) ----
     renderCalendar(currentDate);
   </script>
-</body>
+</head>
+<body></body>
 </html>
